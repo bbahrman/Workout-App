@@ -62,12 +62,17 @@ Resources:
         swagger: '2.0'
         info: {}
         paths:
-          /:
+          /workout:
             get:
+              responses: {}
+            post:
               x-amazon-apigateway-integration:
                 httpMethod: POST
                 type: aws_proxy
-                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${getWelcomePage.Arn}/invocations
+                uri: !If
+                  - postWorkoutUseExistingResource
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${postWorkoutExistingResource.Arn}/invocations
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${postWorkout.Arn}/invocations
               responses: {}
       EndpointConfiguration: REGIONAL
   getWelcomePage:
@@ -85,15 +90,46 @@ Resources:
       Tracing: Active
       Policies:
         - AWSXrayWriteOnlyAccess
-      Events:
-        apiGET:
-          Type: Api
-          Properties:
-            Path: /
-            Method: GET
-            RestApiId: !Ref api
     Metadata:
       StackeryName: getWelcomePage
+  postWorkout:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-postWorkout
+      Description: !Sub
+        - Stack ${StackTagName} Environment ${EnvironmentTagName} Function ${ResourceName}
+        - ResourceName: postWorkout
+      CodeUri: src/Function
+      Handler: index.handler
+      Runtime: nodejs8.10
+      MemorySize: 3008
+      Timeout: 30
+      Tracing: Active
+      Policies:
+        - AWSXrayWriteOnlyAccess
+      Events:
+        apiPOSTworkout:
+          Type: Api
+          Properties:
+            Path: /workout
+            Method: POST
+            RestApiId: !Ref api
+    Condition: postWorkoutCreateNewResource
+  postWorkoutExistingResource:
+    Type: Custom::StackeryExistingResource
+    Properties:
+      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:stackery-agent-commander
+      Type: function
+      Data: arn:aws:lambda:us-east-2:398501876458:function:workout-get
+    Condition: postWorkoutUseExistingResource
+  postWorkoutExistingResourceapiPOSTworkoutPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      FunctionName: !Ref postWorkoutExistingResource
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${api}/*/POST/workout
+    Condition: postWorkoutUseExistingResource
 Parameters:
   StackeryStackTagName:
     Type: String
@@ -107,3 +143,15 @@ Parameters:
   StackeryDeploymentTimestamp:
     Type: Number
     Description: Deployment preparation timestamp in milliseconds Since Epoch (injected by Stackery at deployment time)
+  StackTagName:
+    Type: String
+    Description: Stack Name (injected by Stackery at deployment time)
+  EnvironmentTagName:
+    Type: String
+    Description: Environment Name (injected by Stackery at deployment time)
+Conditions:
+  postWorkoutCreateNewResource: !Equals
+    - 'false'
+    - 'true'
+  postWorkoutUseExistingResource: !Not
+    - Condition: postWorkoutCreateNewResource
